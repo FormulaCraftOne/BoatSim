@@ -1,39 +1,15 @@
-
-
-function love.mousemoved( x, y, dx, dy, istouch )
-    love.delta = love.delta + dx*2^(love.sensitivityStep/12)
-end
-
-function love.wheelmoved( x, y )
-    love.sensitivityStep = love.sensitivityStep + y
-end
-
-function love.keyreleased(key, scancode, isrepeat)
-   if key == "escape" then
-      love.event.quit()
-   elseif key == "r" then
-    boatstate = {
-        velocity = {0,0,0,0},
-        position = {0,0,0,0},
-        accel = 0
-    }
-   end
-end
-
-
-
-
 function love.load()
-    BOAT_MU = 0.22
     BOAT_A0 = 16
     BOAT_T0 = 400
     MOUSE_SCALE = 3200
-    love.sensitivityStep = 0
+
     boatstate = {
         velocity = {0,0,0,0},
         position = {0,0,0,0},
+        friction = 0.22,
         accel = 0
     }
+
     GRIDPAIRS={}
     -- populate vertical lines
     for i=1,11 do
@@ -43,8 +19,77 @@ function love.load()
     for i=12,22 do
         GRIDPAIRS[i]={-5,i-17,5,i-17}
     end
+
+    love.sensitivityStep = 0
     love.delta=0
     love.mouse.setRelativeMode( true )
+
+    F = function (dt,mu)
+            local f0 = math.exp(-mu*dt)
+            local f1 = (1-f0)/mu
+            local f2 = (dt-f1)/mu
+           return f0, f1, f2
+        end
+
+    A = function (w,a,s,d,mouse)
+            local nz = (w and 1 or 0) + (s and -1 or 0)
+            local nx = (d and 1 or 0) + (a and -1 or 0) + mouse
+            local ax = math.min(math.max(nx,-1),1)
+            local az = nz>0  and  1   or (
+                       nz<0  and -1/8 or (
+                       nx==0 and  0   or (
+                       math.abs(nx)/8  )))
+           return ax, az
+        end
+end
+
+function love.mousemoved( x, y, dx, dy, istouch )
+    love.delta = love.delta + dx*2^(love.sensitivityStep/12)
+end
+
+function love.wheelmoved( x, y )
+    love.sensitivityStep = love.sensitivityStep + y
+end
+
+function love.keyreleased(key, scancode)
+   if key == "escape" then
+      love.event.quit()
+   elseif key == "r" then
+      boatstate = {
+        velocity = {0,0,0,0},
+        position = {0,0,0,0},
+        friction = boatstate.friction,
+        accel = 0
+      }
+   elseif key == "1" then
+      boatstate.friction = 0.22
+   elseif key == "2" then
+      boatstate.friction = 0.4
+   elseif key == "3" then
+      boatstate.friction = 2.0
+   elseif key == "4" then
+      boatstate.friction = 8.0
+   end
+end
+
+function love.update(dt)
+    local dx, ang, _ = love.delta, boatstate.position[4]*math.pi/180, love.keyboard.isDown
+    local ax, az = A( _('w') , _('a') , _('s') , _('d') , dx/dt/MOUSE_SCALE )
+    local cos , sin = math.cos(ang), math.sin(ang)
+    local d0, v0, a0 = boatstate.position , boatstate.velocity, {BOAT_A0*az*cos, 0 , BOAT_A0*az*sin , BOAT_T0*ax} 
+    local f0, f1, f2 = F(dt,boatstate.friction)
+    for i=1,4 do
+        boatstate.velocity[i] = a0[i]*f1 + v0[i]*f0
+        boatstate.position[i] = a0[i]*f2 + v0[i]*f1 + d0[i] 
+    end
+    boatstate.position[4] = ( ( boatstate.position[4] + 180 ) % 360) - 180
+    if ax==0 and 1e-8 > boatstate.velocity[4]*boatstate.velocity[4] then boatstate.velocity[4] = 0 end
+    if az==0 and 1e-8 > boatstate.velocity[1]*boatstate.velocity[1] + boatstate.velocity[3]*boatstate.velocity[3] then
+       boatstate.velocity[1]=0
+       boatstate.velocity[3]=0
+    end
+    love.delta = love.delta - dx
+    boatstate.angAccel = ax
 end
 
 function love.draw()
@@ -64,62 +109,14 @@ function love.draw()
     end
     love.graphics.print(boatstate.position[1] .. ',' .. boatstate.position[2] .. ',' .. boatstate.position[3] .. ' (' .. boatstate.position[4] .. ')\n' ..
                         boatstate.velocity[1] .. ',' .. boatstate.velocity[2] .. ',' .. boatstate.velocity[3] .. ' (' .. boatstate.velocity[4] .. ')\n' ..
-                        'Sensitivity: ' .. 2^(love.sensitivityStep/12) .. ' (step ' .. love.sensitivityStep .. ', scroll to adjust) \n' ..
+                        'Press 1/2/3/4 to set friction to Blue/Pack/Air/Block (mu='  .. boatstate.friction .. ')\n' ..
+                        'Sensitivity: ' .. 2^(love.sensitivityStep/12) .. ' (step '  .. love.sensitivityStep .. ', scroll to adjust) \n' ..
                         'Press R to reset, Esc to exit.')
+    love.graphics.printf(math.sqrt(boatstate.velocity[1]*boatstate.velocity[1]+boatstate.velocity[3]*boatstate.velocity[3]) .. ' m/s',0,cy-dy-15,windowWidth,"center")
     love.graphics.setColor(181/256,153/256,104/256)
     love.graphics.rectangle('fill',cx-dx,cy-dy,2*dx,2*dy)
     love.graphics.setColor(0,1,0)
     love.graphics.line(cx,cy,cx+ax*dx,cy)
     love.graphics.setColor(1,0,0)
     love.graphics.line(cx,cy-dy,cx,cy+dy)
-end
-
-function love.update(dt)
-    local dx = love.delta
-    local _  = love.keyboard.isDown
-    local ax, ay = A( _('w') , _('a') , _('s') , _('d') , dx/dt/MOUSE_SCALE )
-    local f0, f1, f2 = F(dt,BOAT_MU)
-    local ang = boatstate.position[4]*math.pi/180
-    local cos , sin = math.cos(ang), math.sin(ang)
-    local a0, v0 = {BOAT_A0*ay*cos, 0 , BOAT_A0*ay*sin , BOAT_T0*ax} , boatstate.velocity
-    for i=1,3 do
-        boatstate.velocity[i] = a0[i]*f1 + v0[i]*f0
-        boatstate.position[i] = a0[i]*f2 + v0[i]*f1 + boatstate.position[i] 
-    end
-    boatstate.velocity[4] =     a0[4]*f1 + v0[4]*f0
-    boatstate.position[4] = ( ( a0[4]*f2 + v0[4]*f1 + boatstate.position[4] + 180 ) % 360) - 180
-    love.delta = love.delta - dx
-    boatstate.angAccel = ax
-end
-
-function F(dt,mu)
-    local f0 = math.exp(-mu*dt)
-    local f1 = (1-f0)/mu
-    local f2 = (dt-f1)/mu
-   return f0, f1, f2
-end
-
-function A(w,a,s,d,mouse)
-    local forward , right = 0 , 0
-    if w then
-       forward = forward + 1
-    end
-    if a then
-       right = right - 1
-    end
-    if s then
-       forward = forward - 1
-    end
-    if d then
-       right = right + 1
-    end
-    right = math.max(-1,math.min(1,right+mouse))
-    if forward>0 then
-       forward =  1
-    elseif forward<0 then
-       forward = -1/8
-    elseif not (right==0) then
-       forward = math.abs(right)/8
-    end
-    return right, forward
 end
